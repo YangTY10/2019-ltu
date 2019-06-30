@@ -1,0 +1,99 @@
+version: '2'
+services:
+  mongo:
+    image: mongo
+    container_name: mongodb
+    volumes:
+      - ./mongodb:/data/db
+    restart: always
+    expose:
+      - 6016
+
+  adminmongo:
+    image: mrvautin/adminmongo
+    container_name: adminmongo
+    ports:
+      - 1234:1234
+    environment:
+      - HOST=0.0.0.0
+
+  zookeeper:
+    image: wurstmeister/zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka:2.11-0.11.0.3
+    container_name: kafka
+    ports:
+      - "9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_HOST_NAME: 192.168.99.100
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "FALSE"
+      KAFKA_DELETE_TOPIC_ENABLE: "TRUE"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  jupyter:
+    build:
+     context: ./dockerfile
+     dockerfile: dockerfile-jupyter
+    container_name: jupyter
+    ports:
+      - "8890:8888"
+    command: start-notebook.sh --NotebookApp.token=''
+    volumes:
+      - ./code:/home/jovyan/work
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=ltu
+    volumes:
+      - ./mysql_db/mysql_data:/var/lib/mysql
+      - ./mysql_db/mysql_init:/docker-entrypoint-initdb.d/
+
+  ksql-server:
+    image: confluentinc/cp-ksql-server:5.2.1
+    container_name: ksql-server
+    depends_on:
+      - kafka
+    ports:
+      - "8088:8088"
+    environment:
+      KSQL_CONFIG_DIR: "/etc/ksql"
+      KSQL_LOG4J_OPTS: "-Dlog4j.configuration=file:/etc/ksql/log4j-rolling.properties"
+      KSQL_BOOTSTRAP_SERVERS: kafka:9092
+      KSQL_LISTENERS: "http://0.0.0.0:8088"
+      KSQL_CACHE_MAX_BYTES_BUFFERING: 0
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+
+  ksql-cli:
+    image: confluentinc/cp-ksql-cli:5.2.1
+    container_name: ksql-cli
+    depends_on:
+      - kafka
+      - ksql-server
+    entrypoint: /bin/sh
+    tty: true
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:5.2.1
+    container_name: schema-registry
+    depends_on:
+      - zookeeper
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
+
